@@ -38,12 +38,13 @@ sample_rate_dict = {}
 sev_label = {}
 
 
-def label_sampling_tuh(labels, feature_samplerate):
+def label_sampling_tuh(labels, GLOBAL_DATA):
     y_target = ""
     remained = 0
+    feature_samplerate = GLOBAL_DATA['feature_sample_rate']
     feature_intv = 1/float(feature_samplerate)
     for i in labels:
-        begin, end, label = i.split(" ")[:3]
+        _, begin, end, label = i.split(",")[:4]
 
         intv_count, remained = divmod(float(end) - float(begin) + remained, feature_intv)
         y_target += int(intv_count) * str(GLOBAL_DATA['disease_labels'][label])
@@ -72,7 +73,7 @@ def generate_training_data_leadwise_tuh_train(file):
         return
     # if not any(elem in y_labels for elem in GLOBAL_DATA['disease_type']): # if non-patient exist
     #     return
-    y_sampled = label_sampling_tuh(y, GLOBAL_DATA['feature_sample_rate'])
+    y_sampled = label_sampling_tuh(y, GLOBAL_DATA)
     
     ############################# part 2: input data filtering #############################
     signal_list = []
@@ -300,8 +301,9 @@ def generate_training_data_leadwise_tuh_train(file):
             pickle.dump(new_data, _f)      
         new_data = {}
 
-def generate_training_data_leadwise_tuh_train_final(file):
-    global GLOBAL_DATA
+def generate_training_data_leadwise_tuh_train_final(data):
+    file = data[0]
+    GLOBAL_DATA = data[1]
     sample_rate = GLOBAL_DATA['sample_rate']    # EX) 200Hz
     file_name = ".".join(file.split(".")[:-1])  # EX) $PATH_TO_EEG/train/01_tcp_ar/072/00007235/s003_2010_11_20/00007235_s003_t000
     data_file_name = file_name.split("/")[-1]   # EX) 00007235_s003_t000
@@ -310,12 +312,12 @@ def generate_training_data_leadwise_tuh_train_final(file):
     for idx, signal in enumerate(signals):
         label_noref = signal_headers[idx]['label'].split("-")[0]    # EX) EEG FP1-ref or EEG FP1-LE --> EEG FP1
         label_list_c.append(label_noref)   
-
     ############################# part 1: labeling  ###############################
     label_file = open(file_name + "." + GLOBAL_DATA['label_type'], 'r') # EX) 00007235_s003_t003.tse or 00007235_s003_t003.tse_bi
     y = label_file.readlines()
-    y = list(y[2:])
-    y_labels = list(set([i.split(" ")[2] for i in y]))
+    y = list(y[:])
+    y = [line for line in y if not line.strip().startswith('#') and not line.strip().startswith('channel')]
+    y_labels = list(set([i.split(",")[3] for i in y]))
     signal_sample_rate = int(signal_headers[0]['sample_rate'])
     if sample_rate > signal_sample_rate:
         return
@@ -323,20 +325,21 @@ def generate_training_data_leadwise_tuh_train_final(file):
         return
     # if not any(elem in y_labels for elem in GLOBAL_DATA['disease_type']): # if non-patient exist
     #     return
-    y_sampled = label_sampling_tuh(y, GLOBAL_DATA['feature_sample_rate'])
+    y_sampled = label_sampling_tuh(y, GLOBAL_DATA)
 
     # check if seizure patient or non-seizure patient
     patient_wise_dir = "/".join(file_name.split("/")[:-2])
     patient_id = file_name.split("/")[-3]
-    edf_list = search_walk({'path': patient_wise_dir, 'extension': ".tse_bi"})
+    edf_list = search_walk({'path': patient_wise_dir, 'extension': ".csv_bi"})
     patient_bool = False
-    for tse_bi_file in edf_list:
-        label_file = open(tse_bi_file, 'r') # EX) 00007235_s003_t003.tse or 00007235_s003_t003.tse_bi
+    for csv_bi_file in edf_list:
+        label_file = open(csv_bi_file, 'r') # EX) 00007235_s003_t003.tse or 00007235_s003_t003.tse_bi
         y = label_file.readlines()
-        y = list(y[2:])
+        y = [line for line in y if not line.strip().startswith('#') and not line.strip().startswith('channel')]
+        y = list(y)
         for line in y:
             if len(line) > 5:
-                if line.split(" ")[2] != 'bckg':
+                if line.split(",")[3] != 'bckg':
                     patient_bool = True
                     break
         if patient_bool:
@@ -369,8 +372,7 @@ def generate_training_data_leadwise_tuh_train_final(file):
     for lead_signal in GLOBAL_DATA['label_list']:
         signal_final_list_raw.append(signal_list[signal_label_list.index(lead_signal)])
 
-    new_length = len(signal_final_list_raw[0]) * (float(GLOBAL_DATA['feature_sample_rate']) / GLOBAL_DATA['sample_rate'])
-    
+    new_length = (int)(len(signal_final_list_raw[0]) * (float(GLOBAL_DATA['feature_sample_rate']) / GLOBAL_DATA['sample_rate']))
     if len(y_sampled) > new_length:
         y_sampled = y_sampled[:new_length]
     elif len(y_sampled) < new_length:
@@ -568,7 +570,7 @@ def generate_training_data_leadwise_tuh_dev(file):
         return
     # if not any(elem in y_labels for elem in GLOBAL_DATA['disease_type']): # if non-patient exist
     #     return
-    y_sampled = label_sampling_tuh(y, GLOBAL_DATA['feature_sample_rate'])
+    y_sampled = label_sampling_tuh(y, GLOBAL_DATA)
     
     # check if seizure patient or non-seizure patient
     patient_wise_dir = "/".join(file_name.split("/")[:-2])
@@ -771,14 +773,15 @@ def main(args):
                     'EEG P3', 'EEG P4', 'EEG O1', 'EEG O2', 'EEG T5', 'EEG T6', 'EEG PZ', 'EEG FZ']
 
     # eeg_data_directory = "$PATH_TO_EEG/{}".format(data_type)
-    eeg_data_directory = os.environ["PATH_TO_EEG"]
-    print(eeg_data_directory)
+    eeg_data_directory = f"{os.environ["PATH_TO_EEG"]}{data_type}"
     # eeg_data_directory = "/mnt/aitrics_ext/ext01/shared/edf/tuh_final/{}".format(data_type)
     
-    if label_type == "tse":
-        disease_labels =  {'bckg': 0, 'cpsz': 1, 'mysz': 2, 'gnsz': 3, 'fnsz': 4, 'tnsz': 5, 'tcsz': 6, 'spsz': 7, 'absz': 8}
-    elif label_type == "tse_bi":
+    if label_type == "csv":
+        # disease_labels =  {'bckg': 0, 'cpsz': 1, 'mysz': 2, 'gnsz': 3, 'fnsz': 4, 'tnsz': 5, 'tcsz': 6, 'spsz': 7, 'absz': 8}
+        disease_labels = {"null": 0, "spsw": 1, "gped": 2, "pled": 3, "eybl": 4, "artf": 5, "bckg": 6, "seiz": 7, "fnsz": 8, "gnsz": 9, "spsz": 10, "cpsz": 11, "absz": 12, "tnsz": 13, "cnsz": 14, "tcsz": 15, "atsz": 16, "mysz": 17, "nesz": 18, "intr": 19, "slow": 20, "eyem": 21, "chew": 22, "shiv": 23, "musc": 24, "elpp": 25, "elst": 26, "calb": 27, "hphs": 28, "trip": 29, "elec": 30, "eyem_chew": 100, "eyem_shiv": 101, "eyem_musc": 102, "eyem_elec": 103, "chew_shiv": 104, "chew_musc": 105, "chew_elec": 106, "shiv_musc": 107, "shiv_elec": 108, "musc_elec": 109}
+    elif label_type == "csv_bi":
         disease_labels =  {'bckg': 0, 'seiz': 1}
+
     disease_labels_inv = {v: k for k, v in disease_labels.items()}
     
     edf_list1 = search_walk({'path': eeg_data_directory, 'extension': ".edf"})
@@ -803,7 +806,7 @@ def main(args):
     GLOBAL_DATA['fsr_sr_ratio'] = (sample_rate // feature_sample_rate)
     GLOBAL_DATA['min_binary_slicelength'] = args.min_binary_slicelength
     GLOBAL_DATA['min_binary_edge_seiz'] = args.min_binary_edge_seiz
-
+    
     target_dictionary = {0:0}
     selected_diseases = []
     for idx, i in enumerate(args.disease_type):
@@ -825,9 +828,9 @@ def main(args):
     print("################ Preprocess begins... ################\n")
     
     if (task_type == "binary") and (args.data_type == "train"):
-        run_multi_process(generate_training_data_leadwise_tuh_train_final, edf_list, n_processes=cpu_num)
+        run_multi_process(generate_training_data_leadwise_tuh_train_final, edf_list, GLOBAL_DATA, n_processes=cpu_num)
     elif (task_type == "binary") and (args.data_type == "dev"):
-        run_multi_process(generate_training_data_leadwise_tuh_train_final, edf_list, n_processes=cpu_num)
+        run_multi_process(generate_training_data_leadwise_tuh_train_final, edf_list, GLOBAL_DATA, n_processes=cpu_num)
         
 if __name__ == '__main__':
     # make sure all edf file name different!!! if not, additional coding is necessary
